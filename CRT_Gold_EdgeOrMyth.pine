@@ -1,0 +1,66 @@
+//@version=5
+// CRT on Gold - Original vs "Failed CRT" (Edge or Myth, free script)
+// Tested on XAUUSD 2020-2026 with real spread: youtube.com/@edgeormyth
+// Original idea: Candle Range Theory (Smart Risk). This script lets you switch
+// between the original CRT reversal and the "Failed CRT" breakout that worked
+// better on gold in our test (4H chart, 1:1).
+strategy("CRT Gold - Original vs Failed CRT [Edge or Myth]", overlay=true,
+     initial_capital=10000, default_qty_type=strategy.percent_of_equity, default_qty_value=10,
+     commission_type=strategy.commission.cash_per_contract, commission_value=0, slippage=5,
+     process_orders_on_close=false, calc_on_every_tick=false)
+
+mode     = input.string("Failed CRT (breakout)", "Mode", options=["Failed CRT (breakout)", "Original CRT (reversal)"])
+rr       = input.float(1.0, "Reward : Risk (Failed CRT)", minval=0.5, step=0.5)
+useHour  = input.bool(false, "Original CRT: only one range candle per day")
+nyHour   = input.int(8, "Range candle hour (New York)", minval=0, maxval=23)
+useEma   = input.bool(false, "Only trade with the 200 EMA")
+showBox  = input.bool(true, "Draw the range candle")
+
+ema200 = ta.ema(close, 200)
+plot(useEma ? ema200 : na, "200 EMA", color=color.new(color.orange, 0), linewidth=2)
+
+rH = high[1]
+rL = low[1]
+rngHourOk = not useHour or hour(time[1], "America/New_York") == nyHour
+flat = strategy.position_size == 0
+
+// ---------- Failed CRT: the 2nd candle CLOSES outside the range -> follow it
+fLong  = close > rH
+fShort = close < rL
+
+// ---------- Original CRT: the 2nd candle sweeps one side and closes back inside
+oShort = high > rH and low >= rL and close <= rH and close >= rL
+oLong  = low < rL and high <= rH and close >= rL and close <= rH
+
+trendLongOk  = not useEma or close > ema200
+trendShortOk = not useEma or close < ema200
+
+if flat and barstate.isconfirmed
+    if mode == "Failed CRT (breakout)"
+        if fLong and trendLongOk
+            stopPx = rL
+            tgtPx  = close + rr * (close - stopPx)
+            strategy.entry("Long", strategy.long)
+            strategy.exit("L-exit", "Long", stop=stopPx, limit=tgtPx)
+        else if fShort and trendShortOk
+            stopPx = rH
+            tgtPx  = close - rr * (stopPx - close)
+            strategy.entry("Short", strategy.short)
+            strategy.exit("S-exit", "Short", stop=stopPx, limit=tgtPx)
+    else if rngHourOk
+        if oLong and trendLongOk
+            strategy.entry("Long", strategy.long)
+            strategy.exit("L-exit", "Long", stop=low, limit=rH)
+        else if oShort and trendShortOk
+            strategy.entry("Short", strategy.short)
+            strategy.exit("S-exit", "Short", stop=high, limit=rL)
+
+// ---------- visuals
+isSig = mode == "Failed CRT (breakout)" ? (fLong or fShort) : ((oLong or oShort) and rngHourOk)
+if showBox and isSig and barstate.isconfirmed
+    box.new(bar_index - 1, rH, bar_index + 3, rL, border_color=color.new(color.aqua, 0),
+         bgcolor=color.new(color.aqua, 88), text="CRT range", text_color=color.aqua, text_size=size.small)
+plotshape(mode == "Failed CRT (breakout)" and fLong and barstate.isconfirmed, "Failed CRT long", shape.triangleup, location.belowbar, color.new(color.lime, 0), size=size.small)
+plotshape(mode == "Failed CRT (breakout)" and fShort and barstate.isconfirmed, "Failed CRT short", shape.triangledown, location.abovebar, color.new(color.red, 0), size=size.small)
+plotshape(mode != "Failed CRT (breakout)" and oLong and rngHourOk and barstate.isconfirmed, "CRT sweep long", shape.labelup, location.belowbar, color.new(color.lime, 0), text="sweep", textcolor=color.black, size=size.tiny)
+plotshape(mode != "Failed CRT (breakout)" and oShort and rngHourOk and barstate.isconfirmed, "CRT sweep short", shape.labeldown, location.abovebar, color.new(color.red, 0), text="sweep", textcolor=color.white, size=size.tiny)
